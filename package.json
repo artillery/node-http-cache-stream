@@ -1,0 +1,38 @@
+{
+  "name": "http-disk-cache",
+  "version": "0.0.1",
+  "description": "An HTTP client that maintains a persistent disk-based cache",
+  "homepage": "https://github.com/artillery/node-http-disk-cache#readme",
+  "author": "Mark Logan <mark@artillery.com>",
+  "license": "MIT",
+  "main": "index.js",
+  "scripts": {
+    "test": "nodeunit test.js"
+  },
+  "keywords": [
+    "http cache",
+    "http",
+    "cache",
+    "stream"
+  ],
+  "engines": {
+    "node": ">=0.10"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/artillery/node-http-disk-cache.git"
+  },
+  "bugs": {
+    "url": "https://github.com/artillery/node-http-disk-cache/issues"
+  },
+  "devDependencies": {
+    "nodeunit": "^0.9.1",
+    "temp": "^0.8.3"
+  },
+  "dependencies": {
+    "artillery-async": "^1.0.2",
+    "debug": "^2.2.0",
+    "mkdirp": "^0.5.1",
+    "request": "^2.65.0"
+  }
+}
