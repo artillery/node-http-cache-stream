@@ -13,14 +13,22 @@ An HTTP client that maintains a persistent disk-based cache. This module was wri
 
 ## Example
 
-    var cache = new HTTPCache('/cache/root/directory');
+```javascript
+var cache = new HTTPCache('/cache/root/directory');
 
-    cache.
+cache.getContents('http://example.com/url', function(err, buf, path) {
+  if (err) {
+    console.error("Error:", err);
+  } else {
+    console.log("Saved", buf.length, "bytes to path", path);
+  }
+};
 
-    cache.openReadStream('http://host.com/url', function(err, readStream) {
-      if (err) { /* handle error */ }
-      else { readStream.pipe(destination); }
-    });
+cache.openReadStream('http://example.com/url', function(err, readStream) {
+  if (err) { /* handle error */ }
+  else { readStream.pipe(destination); }
+});
+```
 
 ## API
 
