@@ -318,7 +318,7 @@ HTTPCache.prototype.openReadStream = function(url, cb) {
     options = { url: url };
   }
 
-  debug("openReadStream", options);
+  debug("openReadStream", options.url);
 
   // If there is currently a cache-write in progress for this url, wait until it's finished
   // before starting the request.
@@ -415,7 +415,7 @@ HTTPCache.prototype.getContents = function(url, cb) {
   } else {
     options = { url: url };
   }
-  debug("getContents" + url.url);
+  debug("getContents start", options.url);
 
   this.openReadStream(options, function(err, readStream, path) {
     if (err) { return cb(err); }
@@ -425,10 +425,12 @@ HTTPCache.prototype.getContents = function(url, cb) {
       chunks.push(chunk);
     });
     readStream.on('error', function(err) {
+      debug("getContents error", options.url, err);
       readStream.removeAllListeners();
       cb(err);
     });
     readStream.on('end', function() {
+      debug("getContents finish", options.url);
       var buf = Buffer.concat(chunks);
       if (options.encoding == 'ArrayBuffer') {
         // Provide the client with an ArrayBuffer instead of a node Buffer object.
