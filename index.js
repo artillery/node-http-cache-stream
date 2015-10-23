@@ -1,3 +1,10 @@
+/**
+ * Copyright (c) 2015 Artillery Games, Inc. All rights reserved.
+ *
+ * This source code is licensed under the MIT-style license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
 var async = require('artillery-async');
 var crypto = require('crypto');
 var fs = require('fs');

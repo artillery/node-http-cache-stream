@@ -1,3 +1,10 @@
+/**
+ * Copyright (c) 2015 Artillery Games, Inc. All rights reserved.
+ *
+ * This source code is licensed under the MIT-style license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
 var http = require('http');
 var fs = require('fs');
 var temp = require('temp');
