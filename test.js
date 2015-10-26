@@ -258,6 +258,31 @@ exports.tests = {
       doTest(_this, test, '/url1', 'url1 contents', false, true, 0, test.done);
     }
     doTest(this, test, '/url1', 'url1 contents', false, true, 0, chmodCache);
+  },
+
+  testAssertCachedAlreadyInCache: function(test) {
+    var _this = this;
+    var url = this.createUrl('/url1');
+    test.ok(!fs.existsSync(_this.cache.getContentPathname(url, {absolute: true})));
+    doTest(this, test, '/url1', 'url1 contents', false, true, 0, function() {
+      test.ok(fs.existsSync(_this.cache.getContentPathname(url, {absolute: true})));
+      _this.cache.assertCached(url, function(err) {
+        test.equal(err, null);
+        test.ok(fs.existsSync(_this.cache.getContentPathname(url, {absolute: true})));
+        test.done();
+      });
+    });
+  },
+
+  testAssertCachedNotInCache: function(test) {
+    var _this = this;
+    var url = _this.createUrl('/url1');
+    test.ok(!fs.existsSync(_this.cache.getContentPathname(url, {absolute: true})));
+    this.cache.assertCached(url, function(err) {
+      test.equal(err, null);
+      test.ok(fs.existsSync(_this.cache.getContentPathname(url, {absolute: true})));
+      test.done();
+    });
   }
 
 };
