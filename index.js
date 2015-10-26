@@ -315,6 +315,33 @@ function parseCacheControl(cacheControl) {
   return ret;
 }
 
+HTTPCache.prototype.assertCached = function(url, cb) {
+  var _this = this;
+  var options;
+  if (typeof url === 'object') {
+    options = url;
+    url = options.url;
+  } else {
+    options = { url: url };
+  }
+
+  options._skipReadStream = true;
+
+  var entry = new CacheEntry(url);
+
+  this._checkCache(entry, function(err, cacheStatus) {
+    if (cacheStatus === CACHE_STATE_CACHED) {
+      debug('assert cache hit', url);
+      return cb();
+    } else {
+      debug('assert cache miss', url);
+      _this.openReadStream(options, function(err, _, path) {
+        cb(err);
+      });
+    }
+  });
+};
+
 HTTPCache.prototype.openReadStream = function(url, cb) {
   var _this = this;
   var options;
@@ -352,7 +379,8 @@ HTTPCache.prototype.openReadStream = function(url, cb) {
     if (cacheStatus === CACHE_STATE_CACHED) {
       // The cache contents are present and valid, so serve the request from cache.
       cacheWriter.end();
-      return cb(null, _this._createContentReadStream(entry), _this._absPath(entry.contentPath));
+      var readStream = options._skipReadStream ? null : _this._createContentReadStream(entry);
+      return cb(null, readStream, _this._absPath(entry.contentPath));
     } else if (cacheStatus == CACHE_STATE_ERROR) {
       // Some kind of error occurred and we can't access the cache.
       return cb("Error: There was a problem with the asset cache and we can't write files");
@@ -375,7 +403,8 @@ HTTPCache.prototype.openReadStream = function(url, cb) {
           cb(err);
         } else {
           _this._sessionCache[entry.url] = 1;
-          cb(null, _this._createContentReadStream(entry), _this._absPath(entry.contentPath));
+          var readStream = options._skipReadStream ? null : _this._createContentReadStream(entry);
+          cb(null, readStream, _this._absPath(entry.contentPath));
         }
       });
       cacheWriter.end();

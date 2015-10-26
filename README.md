@@ -63,13 +63,19 @@ Callback arguments:
 - `stream`: A readable stream containing the content of the URL
 - `filename`: The path to the contents on disk (contents are always saved to disk regardless of cache expiry)
 
+#### cache.assertCached(url, callback)
+
+Checks whether `url` is already in the cache and, if not, fetches and caches it. `url` may be a string or an object with the same options as `openReadStream()`. This is used to warm up the cache and is less resource-intensive than the other methods.
+
+Callback arguments:
+- `err`: Optional error message
+
 #### cache.getContentPathname(url[, options])
 
-Return a path to a requested URL assuming that it's already been requested.
+Return a path to a requested URL assuming that it's already been cached.
 
 Options:
 - `absolute`: Return an absolute path instead of a path relative to the cache root (default: false)
-
 
 #### cache.reset()
 
