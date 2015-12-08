@@ -14,6 +14,7 @@ var pathlib = require('path');
 var request = require('request');
 var urllib = require('url');
 var debug = require('debug')('http-disk-cache');
+var glob = require('glob');
 
 /////////////// CacheEntry ///////////////
 
@@ -160,6 +161,29 @@ HTTPCache.prototype._cachedThisSession = function(cacheEntry) {
   return this._sessionCache[cacheEntry.url];
 };
 
+function deleteEntry(metaPath, cb) {
+  var contentPath = metaPath.slice(0, -5);
+  var deleteError = null;
+  var barrier = async.barrier(2, function() {
+    if (deleteError) {
+      console.error(
+        "Couldn't delete invalid cache files.\n" +
+        "Files:\n" + contentPath + " " + metaPath  + "\n" +
+        "Error: " + deleteError
+      );
+    }
+    debug('deleted', contentPath);
+    debug('deleted', metaPath);
+    cb(deleteError);
+  });
+  function deleteCb(err) {
+    if (err && err.code !== "ENOENT") { deleteError = err; }
+    return barrier();
+  }
+  fs.unlink(contentPath, deleteCb);
+  fs.unlink(metaPath, deleteCb);
+}
+
 // Checks whether the cache has a valid, unexpired copy of the contents for cacheEntry
 // invokes callback(err, status) when finished, where status is one of:
 //    'cached' - the cache entry is valid and non-expired.
@@ -197,28 +221,6 @@ HTTPCache.prototype._checkCache = function(cacheEntry, callback) {
     );
   }
 
-  function deleteEntry(cb) {
-    var deleteError = null;
-    var barrier = async.barrier(2, function() {
-      if (deleteError) {
-        console.error(
-          "Couldn't delete invalid cache entry.\n" +
-          "Entry:\n" + JSON.stringify(cacheEntry) + "\n" +
-          "Error: " + deleteError
-        );
-      }
-      debug('deleted', _this._absPath(cacheEntry.contentPath));
-      debug('deleted', _this._absPath(cacheEntry.metaPath));
-      cb(deleteError);
-    });
-    function deleteCb(err) {
-      if (err && err.code !== "ENOENT") { deleteError = err; }
-      return barrier();
-    }
-    fs.unlink(_this._absPath(cacheEntry.contentPath), deleteCb);
-    fs.unlink(_this._absPath(cacheEntry.metaPath), deleteCb);
-  }
-
   function validateContents(metadata) {
     debug('validating contents', cacheEntry.contentPath);
     var hash = crypto.createHash('md5');
@@ -241,7 +243,7 @@ HTTPCache.prototype._checkCache = function(cacheEntry, callback) {
           "Detected corrupted cache object: " + cacheEntry.contentPath + "\n" +
           "Expected md5 " + metadata.contentMD5 + " saw " + md5
         );
-        return deleteEntry(function(err) {
+        return deleteEntry(_this._absPath(cacheEntry.metaPath), function(err) {
           if (err) {
             // If the entry was invalid and we failed to delete it, the only choice is to load the
             // asset directly from http.
@@ -257,7 +259,7 @@ HTTPCache.prototype._checkCache = function(cacheEntry, callback) {
   loadMetadata(function(err, metadata) {
     if (err) {
       debug("attempting to delete cache entry due to missing/invalid metadata");
-      return deleteEntry(function(err) {
+      return deleteEntry(_this._absPath(cacheEntry.metaPath), function(err) {
         if (err) {
           // If the entry was invalid and we failed to delete it, the only choice is to load the
           // asset directly from http.
@@ -482,6 +484,85 @@ HTTPCache.prototype.getContents = function(url, cb) {
       }
     });
 
+  });
+};
+
+var RepairResult = {
+  // We removed a bad file from the cache.
+  REPAIR_CLEANED: 'REPAIR_CLEANED',
+  // We found a bad file but couldn't remove it.
+  REPAIR_FAILED: 'REPAIR_FAILED',
+};
+
+exports.RepairResult = RepairResult;
+
+// Scans the entire cache, checksums every file, attempts to remove any corrupted or expired
+// files.
+//
+// The callback receives a boolean indicating whether all detected cache corruptions were
+// repaied, and a list of tuples of [RepairResults, info] describing what actions the
+// repair process took.
+HTTPCache.prototype.repair = function(cb) {
+  var globPath = pathlib.join(this.cacheRoot, "**/*.meta");
+
+  var success = true;
+  var results = [];
+
+  var _this = this;
+  glob(globPath, function (err, files) {
+    if (err != null) { return cb(err); }
+
+    function checkFile(metaPath, nextCb) {
+      function deleteCb(deleteError) {
+        if (deleteError != null) {
+          results.push([RepairResult.REPAIR_FAILED,
+                        "Couldn't remove cache entry: " + deleteError]);
+          success = false;
+        } else {
+          results.push([RepairResult.REPAIR_CLEANED,
+                        "Removed cache entry: " + metaPath]);
+        }
+        nextCb();
+      }
+      fs.readFile(metaPath, { encoding: 'utf8' }, function(err, metaContents) {
+        try {
+          var meta = JSON.parse(metaContents);
+        } catch (e) {
+          deleteEntry(metaPath, deleteCb);
+          return;
+        }
+
+        if (meta.url == null) {
+          deleteEntry(metaPath, deleteCb);
+          return;
+        }
+
+        var entry = new CacheEntry(meta.url);
+        if (_this._absPath(entry.metaPath) != metaPath) {
+          deleteEntry(metaPath, deleteCb);
+          return;
+        }
+
+        _this._checkCache(entry, function (err, status) {
+          if (err != null) {
+            deleteEntry(metaPath, deleteCb);
+            return;
+          }
+          if (status == CACHE_STATE_ERROR) {
+            deleteEntry(metaPath, deleteCb);
+            return;
+          }
+          if (status == CACHE_STATE_NOTCACHED) {
+            results.push([RepairResult.REPAIR_CLEANED, "Removed cache entry: " + metaPath]);
+          }
+          nextCb()
+        });
+      });
+    }
+
+    async.forEachSeries(files, checkFile, function(err) {
+      cb(null, success, results);
+    });
   });
 };
 

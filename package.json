@@ -7,7 +7,7 @@
   "license": "MIT",
   "main": "index.js",
   "scripts": {
-    "test": "nodeunit test.js"
+    "test": "./node_modules/.bin/nodeunit test.js"
   },
   "keywords": [
     "http cache",
@@ -32,6 +32,7 @@
   "dependencies": {
     "artillery-async": "^1.0.2",
     "debug": "^2.2.0",
+    "glob": "^6.0.1",
     "mkdirp": "^0.5.1",
     "request": "^2.65.0"
   }

@@ -10,6 +10,7 @@ var fs = require('fs');
 var temp = require('temp');
 var execSync = require('child_process').execSync;
 var debug = require('debug')('http-disk-cache');
+var async = require('artillery-async');
 
 var httpcache = require('./index');
 
@@ -283,8 +284,64 @@ exports.tests = {
       test.ok(fs.existsSync(_this.cache.getContentPathname(url, {absolute: true})));
       test.done();
     });
-  }
+  },
 
+  testRepair: function(test) {
+    var _this = this;
+    var cachePath = null;
+    async.series([
+      // Create a cache entry
+      function(cb) {
+        _this.cache.getContents(_this.createUrl('/url1'), function (err, buf, path) {
+          cachePath = path;
+          cb(err);
+        });
+      },
+      // Corrupt it.
+      function(cb) {
+        fs.appendFile(cachePath, 'extra data', cb);
+      },
+      function(cb) {
+        _this.cache.repair(function(err, allRepaired, results) {
+          test.ok(allRepaired);
+          test.equal(results.length, 1);
+          test.equal(results[0][0], httpcache.RepairResult.REPAIR_CLEANED);
+          test.ok(!fs.existsSync(cachePath));
+          cb();
+        });
+      },
+
+      // Create it again.
+      function(cb) {
+        _this.cache.getContents(_this.createUrl('/url1'), function (err, buf, path) {
+          cachePath = path;
+          cb(err);
+        });
+      },
+      // Corrupt it.
+      function(cb) {
+        fs.appendFile(cachePath, 'extra data', cb);
+      },
+      // Make it undeletable.
+      function(cb) {
+        var cmd = "chmod -R 500 " + _this.cache.cacheRoot;
+        execSync(cmd);
+        cb();
+      },
+      function(cb) {
+        _this.cache.repair(function(err, allRepaired, results) {
+          test.ok(!allRepaired);
+          test.equal(results.length, 1);
+          test.equal(results[0][0], httpcache.RepairResult.REPAIR_FAILED);
+          test.ok(fs.existsSync(cachePath));
+          cb();
+        });
+      }
+    ], function (err) {
+      if (err != null) { test.fail("Failed: " + err); }
+      test.done();
+    });
+  }
 };
 
 // Load the url twice, advancing the time by deltaT in between the two fetches.
