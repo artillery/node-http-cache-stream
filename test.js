@@ -152,14 +152,33 @@ exports.tests = {
   },
 
   testBasicUrlEtag: function(test) {
-    test.expect(2);
+    test.expect(4);
     var _this = this;
-    this.cache.openReadStream({ url: this.createUrl('/url5'), etagFormat: 'md5' }, function(err, stream, path) {
-      test.ok(stream instanceof fs.ReadStream, "stream should be an fs.ReadStream");
-      catStream(stream, function (contents) {
-        test.equal(contents.toString('utf8'), 'url5 contents');
-        test.done();
-      });
+    async.series([
+      function (cb) {
+        _this.cache.openReadStream({ url: _this.createUrl('/url5'), etagFormat: 'md5' }, function(err, stream, path) {
+          test.equal(_this.requests.length, 1);
+          test.equal(_this.requests[0], '/url5');
+          test.ok(stream instanceof fs.ReadStream, "stream should be an fs.ReadStream");
+          catStream(stream, function (contents) {
+            test.equal(contents.toString('utf8'), 'url5 contents');
+            test.done();
+          });
+        });
+      },
+      function (cb) {
+        _this.cache.openReadStream({ url: _this.createUrl('/url5'), etagFormat: 'md5' }, function(err, stream, path) {
+          test.equal(_this.requests.length, 1); // request is handled from cache.
+          test.ok(stream instanceof fs.ReadStream, "stream should be an fs.ReadStream");
+          catStream(stream, function (contents) {
+            test.equal(contents.toString('utf8'), 'url5 contents');
+            test.done();
+          });
+        });
+      }
+    ], function (err) {
+      if (err != null) { test.fail(err); }
+      test.done();
     });
   },
 
@@ -171,6 +190,41 @@ exports.tests = {
     this.cache.openReadStream({ url: this.createUrl('/url6'), etagFormat: 'md5' }, function(err, stream, path) {
       test.equal(err, 'Failed to validate etag');
       test.equal(stream, null);
+      test.done();
+    });
+  },
+
+  // Specify an etagFormat when fetching a url that does not have an etag.
+  testEtagFormatNoEtag: function(test) {
+    var _this = this;
+    async.series([
+      function (cb) {
+        // Verify that we can fetch a url that doesn't have an etag even when etagFormat is specified.
+        _this.cache.openReadStream({ url: _this.createUrl('/url1'), etagFormat: 'md5' }, function(err, stream, path) {
+          test.equal(_this.requests.length, 1);
+          test.equal(_this.requests[0], '/url1');
+          catStream(stream, function (contents) {
+            test.equal(contents.toString('utf8'), 'url1 contents');
+            cb();
+          });
+        });
+      },
+
+      function (cb) {
+        // Verify that the url is not served from cache if we fetch it again.
+        _this.cache.openReadStream({ url: _this.createUrl('/url1'), etagFormat: 'md5' }, function(err, stream, path) {
+          test.equal(_this.requests.length, 2);
+          test.equal(_this.requests[1], '/url1');
+          catStream(stream, function (contents) {
+            test.equal(contents.toString('utf8'), 'url1 contents');
+            cb();
+          });
+        });
+      },
+
+
+    ], function (err) {
+      if (err != null) { test.fail(err); }
       test.done();
     });
   },
@@ -210,9 +264,7 @@ exports.tests = {
         );
       }
     ], function(err) {
-      if (err != null) {
-        test.fail(err);
-      }
+      if (err != null) { test.fail(err); }
       test.done();
     });
   },

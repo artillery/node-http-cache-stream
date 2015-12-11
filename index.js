@@ -76,9 +76,19 @@ CacheWriter.prototype.setEtag = function setEtag(etag) {
   this.meta.etag = etag;
 };
 
+// If an etagFormat is specified, but the fetched URL has no etag header, we record
+// that there was no etag present. The fetched contents are returned to the application,
+// but the cached entry will never be considered valid, as we don't check noEtagPresent
+// in checkCache.
+CacheWriter.prototype.setNoEtagPresent = function setNoEtagPresent() {
+  debug('no etag present');
+  this.meta.noEtagPresent = true;
+};
+
 CacheWriter.prototype.validateEtag = function validateEtag() {
   var meta = this.meta;
   if (meta.etagFormat == null) { return true; }
+  if (meta.noEtagPresent) { return true; }
   if (meta.etagFormat === 'md5') {
     if (meta.etag === meta.contentMD5) { return true; }
     else { debug('validateEtag failed:', meta.etag, 'vs', meta.contentMD5); return false; }
@@ -464,7 +474,12 @@ HTTPCache.prototype.openReadStream = function(url, cb) {
       }
       if (options.etagFormat === 'md5') {
         debug('setting etag', res.headers['etag']);
-        cacheWriter.setEtag(res.headers['etag']);
+        var etag = res.headers['etag'];
+        if (etag == null) {
+          cacheWriter.setNoEtagPresent();
+        } else {
+          cacheWriter.setEtag(res.headers['etag']);
+        }
       }
 
       // If there's no explicit cache control, the expiry will default to 0 and the
