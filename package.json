@@ -27,6 +27,7 @@
   },
   "devDependencies": {
     "nodeunit": "^0.9.1",
+    "commander": "^2.9.0",
     "temp": "^0.8.3"
   },
   "dependencies": {
