@@ -5,6 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+var crypto = require('crypto');
 var http = require('http');
 var fs = require('fs');
 var temp = require('temp');
@@ -47,6 +48,12 @@ function catStream(stream, cb) {
   });
 }
 
+function md5hash(str) {
+  var hash = crypto.createHash('md5');
+  hash.update(str);
+  return hash.digest('hex');
+}
+
 exports.tests = {
   setUp: function (cb) {
     var _this = this;
@@ -56,17 +63,29 @@ exports.tests = {
       }
       debug("cache root: ", path);
 
+      _this.requests = [];
       _this.nowSeconds = 1000;
       _this.cache = new httpcache.HTTPCache(path);
       _this.cache._now = function() {
         return _this.nowSeconds;
       };
 
+      var url5contents = 'url5 contents';
+      var url6contents = 'url6 contents';
+
       _this.serverUrls = {
         '/url1': newUrlReply('url1 contents', 200, { 'Cache-Control': 'max-age=200' }),
         '/url2': newUrlReply('url2 contents', 200, { 'Cache-Control': 'no-cache' }),
         '/url3': newUrlReply('url3 contents', 200, {}),
         '/url4': newUrlReply('url4 contents', 200, { 'Cache-Control': 'max-age=200=unparseable' }),
+        '/url5': newUrlReply(url5contents, 200, {
+          'Cache-Control': 'max-age=200=unparseable',
+          'etag': md5hash(url5contents)
+        }),
+        '/url6': newUrlReply(url6contents, 200, {
+          'Cache-Control': 'max-age=200=unparseable',
+          'etag': md5hash(url6contents + 'make the hash invalid')
+        }),
       };
 
       _this.createUrl = function(urlPath) {
@@ -81,6 +100,7 @@ exports.tests = {
           throw new Error("Unknown URL " + request.url);
         }
         reply.fetchCount++;
+        _this.requests.push(request.url);
         response.statusCode = reply.status;
         for (var header in reply.headers) {
           response.setHeader(header, reply.headers[header]);
@@ -128,6 +148,72 @@ exports.tests = {
         test.equal(contents.toString('utf8'), 'url1 contents');
         test.done();
       });
+    });
+  },
+
+  testBasicUrlEtag: function(test) {
+    test.expect(2);
+    var _this = this;
+    this.cache.openReadStream({ url: this.createUrl('/url5'), etagFormat: 'md5' }, function(err, stream, path) {
+      test.ok(stream instanceof fs.ReadStream, "stream should be an fs.ReadStream");
+      catStream(stream, function (contents) {
+        test.equal(contents.toString('utf8'), 'url5 contents');
+        test.done();
+      });
+    });
+  },
+
+  // url6 simply lies about its own content md5 sum, which is an easier way to test the effects of a
+  // truncated download.
+  testBadEtag: function(test) {
+    test.expect(2);
+    var _this = this;
+    this.cache.openReadStream({ url: this.createUrl('/url6'), etagFormat: 'md5' }, function(err, stream, path) {
+      test.equal(err, 'Failed to validate etag');
+      test.equal(stream, null);
+      test.done();
+    });
+  },
+
+  testEtagFormatChange: function(test) {
+    var _this = this;
+    var initialPath = null;
+    async.series([
+      // fetch without an etagFormat
+      function(cb) {
+        _this.cache.openReadStream({ url: _this.createUrl('/url5') }, function(err, stream, path) {
+          test.equal(_this.requests.length, 1);
+          test.equal(_this.requests[0], '/url5'); // url5 was fetched once.
+          initialPath = path;
+          cb(err);
+        });
+      },
+      function(cb) {
+        _this.cache.openReadStream({ url: _this.createUrl('/url5') }, function(err, stream, path) {
+          // no additional fetches occurred.
+          test.equal(_this.requests.length, 1);
+          test.equal(_this.requests[0], '/url5');
+          initialPath = path;
+          cb(err);
+        });
+      },
+      function(cb) {
+        _this.cache.openReadStream({ url: _this.createUrl('/url5'), etagFormat: 'md5' },
+          function(err, stream, path) {
+            // Because we specified an etag format, the url was re-fetched so that the etag
+            // could be verified.
+            test.equal(_this.requests.length, 2);
+            test.equal(_this.requests[1], '/url5');
+            initialPath = path;
+            cb(err);
+          }
+        );
+      }
+    ], function(err) {
+      if (err != null) {
+        test.fail(err);
+      }
+      test.done();
     });
   },
 

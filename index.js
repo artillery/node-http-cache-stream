@@ -26,9 +26,10 @@ function canonicalUrl(url) {
 }
 
 // CacheEntry maps a url to relative pathnames for that URLs contents and metadata files.
-function CacheEntry(url) {
+function CacheEntry(url, etagFormat) {
   url = canonicalUrl(url);
   this.url = url;
+  this.etagFormat = etagFormat;
 
   // While it would be nice to use sha256, we need compatability with s3 ETags, which are md5.
   var hash = crypto.createHash('md5');
@@ -48,16 +49,20 @@ function CacheEntry(url) {
 // url. Its constructor accepts a finished callback which fires when the write is finished.
 // Additionally, it accepts callbacks via its `wait` method, which are all fired after the
 // finished callback has run.
-function CacheWriter(url, contentPath, metaPath, finished) {
+function CacheWriter(url, etagFormat, contentPath, metaPath, finished) {
+  if (etagFormat == null) { etagFormat = null; } // can't JSONify undefined.
   this.piping = false;
   this.finished = finished;
   this._waiters = [];
   this.contentPath = contentPath;
   this.metaPath = metaPath;
+  this.err = null;
   this.meta = {
     expiry: 0, // If no expiry is set, cache entries will always be overwritten.
     contentMD5: null,
-    url: url
+    url: url,
+    etagFormat: etagFormat,
+    etag: null
   };
 }
 
@@ -66,12 +71,29 @@ CacheWriter.prototype.setExpiry = function setExpiry(expiry) {
   this.meta.expiry = expiry;
 };
 
+CacheWriter.prototype.setEtag = function setEtag(etag) {
+  debug('setting etag', etag);
+  this.meta.etag = etag;
+};
+
+CacheWriter.prototype.validateEtag = function validateEtag() {
+  var meta = this.meta;
+  if (meta.etagFormat == null) { return true; }
+  if (meta.etagFormat === 'md5') {
+    if (meta.etag === meta.contentMD5) { return true; }
+    else { debug('validateEtag failed:', meta.etag, 'vs', meta.contentMD5); return false; }
+  } else {
+    console.error('invalid etagFormat:', meta.etagFormat);
+    return false;
+  }
+};
+
 CacheWriter.prototype.end = function end(readable) {
   if (this.piping) { return; }
-  this.finished();
+  this.finished(this.err);
   this.finished = null;
   for (var i = 0; i < this._waiters.length; i++) {
-    this._waiters[i]();
+    this._waiters[i](this.err);
   }
 };
 
@@ -103,11 +125,18 @@ CacheWriter.prototype.pipeFrom = function pipeFrom(readable) {
     contentStream.on('error', function(err) {
       contentStream.removeAllListeners();
       console.error("Error writing cached content to " + this.contentPath);
+      _this.err = err;
       _this.piping = false;
       _this.end();
     });
     contentStream.on('finish', function() {
       _this.meta.contentMD5 = hash.digest('hex');
+      if (!_this.validateEtag()) {
+        _this.err = 'Failed to validate etag';
+        _this.piping = false;
+        _this.end();
+        return;
+      }
       var metaStr = JSON.stringify(_this.meta);
       fs.writeFile(_this.metaPath, metaStr, function(err) {
         if (err) {
@@ -210,6 +239,19 @@ HTTPCache.prototype._checkCache = function(cacheEntry, callback) {
           debug("invalid metadata", contents);
           return cb('invalid');
         }
+        if (cacheEntry.etagFormat != null) {
+          // If the etag format changes, the contents are invalidated.
+          if (cacheEntry.etagFormat !== contents.etagFormat) {
+            debug("entry had wrong etagFormat", cacheEntry.etagFormat, 'vs', contents.etagFormat);
+            return cb('invalid');
+          }
+          // This just compares the two checksums recorded in the file. The actual contents are
+          // re-checksummed and compared against contentMD5 later.
+          if (contents.etagFormat === 'md5' && contents.etag !== contents.contentMD5) {
+            debug("contentMD5 does not match etag", contents);
+            return cb('invalid');
+          }
+        }
         // TODO: It would be nice to refresh cache expiry by doing a HEAD request and checking
         // the etag. I'm not sure if that's technically allowable via max-age.
         if (!_this._cachedThisSession(cacheEntry) && (_this._now() > contents.expiry)) {
@@ -291,9 +333,11 @@ HTTPCache.prototype._createCacheWriter = function(cacheEntry) {
     throw new Error("Attempt to call _createCacheWriter while a CacheWriter is already " +
                     "in flight for url " + cacheEntry.url);
   }
-  var ret = new CacheWriter(cacheEntry.url, contentPath, metaPath, function() {
-    delete inFlightWrites[cacheEntry.url];
-  });
+  var ret = new CacheWriter(cacheEntry.url, cacheEntry.etagFormat, contentPath, metaPath,
+    function() {
+      delete inFlightWrites[cacheEntry.url];
+    }
+  );
   inFlightWrites[cacheEntry.url] = ret;
   return ret;
 };
@@ -361,14 +405,15 @@ HTTPCache.prototype.openReadStream = function(url, cb) {
   var inFlight = this._inFlightWrites[url];
   if (inFlight) {
     debug("Waiting for inflight write to " + url + " to complete...");
-    inFlight.wait(function() {
+    inFlight.wait(function(cacheWriterErr) {
+      if (cacheWriterErr != null) { return cb(cacheWriterErr); }
       debug("... inflight write to " + url + " completed, starting fetch");
       _this.openReadStream(options, cb);
     });
     return;
   }
 
-  var entry = new CacheEntry(url);
+  var entry = new CacheEntry(url, options.etagFormat);
 
   // We might not end up writing to the cache at all, but we create a cache writer here, as it
   // also serves as a mux for identical concurrent requests.
@@ -391,7 +436,7 @@ HTTPCache.prototype.openReadStream = function(url, cb) {
     var req = request.get({ url: options.url, headers: options.headers, followRedirect: true });
 
     // Handle HTTP request errors.
-    req.on('error', function(err) {
+    req.on('error', function reqOnError(err) {
       cacheWriter.end();
       cb(err);
       req.removeAllListeners();
@@ -400,9 +445,11 @@ HTTPCache.prototype.openReadStream = function(url, cb) {
 
     // Handle the start of the HTTP response.
     function finish(err, res) {
-      cacheWriter.wait(function() {
+      cacheWriter.wait(function(cacheWriterErr) {
         if (err) {
           cb(err);
+        } else if (cacheWriterErr) {
+          cb(cacheWriterErr);
         } else {
           _this._sessionCache[entry.url] = 1;
           var readStream = options._skipReadStream ? null : _this._createContentReadStream(entry);
@@ -414,6 +461,10 @@ HTTPCache.prototype.openReadStream = function(url, cb) {
     req.on('response', function(res) {
       if (res.statusCode !== 200) {
         return finish("URL " + url + " could not be fetched. status: " + res.statusCode);
+      }
+      if (options.etagFormat === 'md5') {
+        debug('setting etag', res.headers['etag']);
+        cacheWriter.setEtag(res.headers['etag']);
       }
 
       // If there's no explicit cache control, the expiry will default to 0 and the
