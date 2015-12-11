@@ -473,12 +473,13 @@ HTTPCache.prototype.openReadStream = function(url, cb) {
         return finish("URL " + url + " could not be fetched. status: " + res.statusCode);
       }
       if (options.etagFormat === 'md5') {
-        debug('setting etag', res.headers['etag']);
         var etag = res.headers['etag'];
+        debug('setting etag', etag);
+        if (typeof etag === 'string') { etag = etag.replace(/['"]/g, ''); }
         if (etag == null) {
           cacheWriter.setNoEtagPresent();
         } else {
-          cacheWriter.setEtag(res.headers['etag']);
+          cacheWriter.setEtag(etag);
         }
       }
 

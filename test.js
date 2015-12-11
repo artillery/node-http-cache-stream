@@ -72,6 +72,7 @@ exports.tests = {
 
       var url5contents = 'url5 contents';
       var url6contents = 'url6 contents';
+      var url7contents = 'url7 contents';
 
       _this.serverUrls = {
         '/url1': newUrlReply('url1 contents', 200, { 'Cache-Control': 'max-age=200' }),
@@ -79,12 +80,16 @@ exports.tests = {
         '/url3': newUrlReply('url3 contents', 200, {}),
         '/url4': newUrlReply('url4 contents', 200, { 'Cache-Control': 'max-age=200=unparseable' }),
         '/url5': newUrlReply(url5contents, 200, {
-          'Cache-Control': 'max-age=200=unparseable',
+          'Cache-Control': 'max-age=200',
           'etag': md5hash(url5contents)
         }),
         '/url6': newUrlReply(url6contents, 200, {
-          'Cache-Control': 'max-age=200=unparseable',
+          'Cache-Control': 'max-age=200',
           'etag': md5hash(url6contents + 'make the hash invalid')
+        }),
+        '/url7': newUrlReply(url7contents, 200, {
+          'Cache-Control': 'max-age=200',
+          'etag': '"' + md5hash(url7contents) + '"'
         }),
       };
 
@@ -172,6 +177,37 @@ exports.tests = {
           test.ok(stream instanceof fs.ReadStream, "stream should be an fs.ReadStream");
           catStream(stream, function (contents) {
             test.equal(contents.toString('utf8'), 'url5 contents');
+            test.done();
+          });
+        });
+      }
+    ], function (err) {
+      if (err != null) { test.fail(err); }
+      test.done();
+    });
+  },
+
+  testQuotedEtag: function(test) {
+    test.expect(4);
+    var _this = this;
+    async.series([
+      function (cb) {
+        _this.cache.openReadStream({ url: _this.createUrl('/url7'), etagFormat: 'md5' }, function(err, stream, path) {
+          test.equal(_this.requests.length, 1);
+          test.equal(_this.requests[0], '/url7');
+          test.ok(stream instanceof fs.ReadStream, "stream should be an fs.ReadStream");
+          catStream(stream, function (contents) {
+            test.equal(contents.toString('utf8'), 'url7 contents');
+            test.done();
+          });
+        });
+      },
+      function (cb) {
+        _this.cache.openReadStream({ url: _this.createUrl('/url7'), etagFormat: 'md5' }, function(err, stream, path) {
+          test.equal(_this.requests.length, 1); // request is handled from cache.
+          test.ok(stream instanceof fs.ReadStream, "stream should be an fs.ReadStream");
+          catStream(stream, function (contents) {
+            test.equal(contents.toString('utf8'), 'url7 contents');
             test.done();
           });
         });
