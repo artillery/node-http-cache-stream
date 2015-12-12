@@ -383,7 +383,7 @@ HTTPCache.prototype.assertCached = function(url, cb) {
 
   options._skipReadStream = true;
 
-  var entry = new CacheEntry(url);
+  var entry = new CacheEntry(url, options.etagFormat);
 
   this._checkCache(entry, function(err, cacheStatus) {
     if (cacheStatus === CACHE_STATE_CACHED) {

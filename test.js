@@ -305,6 +305,41 @@ exports.tests = {
     });
   },
 
+  testEtagFormatChangeAssertCached: function(test) {
+    var _this = this;
+    var initialPath = null;
+    async.series([
+      // fetch without an etagFormat
+      function(cb) {
+        _this.cache.assertCached({ url: _this.createUrl('/url5') }, function(err) {
+          test.equal(_this.requests.length, 1);
+          test.equal(_this.requests[0], '/url5'); // url5 was fetched once.
+          cb(err);
+        });
+      },
+      function(cb) {
+        _this.cache.assertCached({ url: _this.createUrl('/url5') }, function(err) {
+          // no additional fetches occurred.
+          test.equal(_this.requests.length, 1);
+          test.equal(_this.requests[0], '/url5');
+          cb(err);
+        });
+      },
+      function(cb) {
+        _this.cache.assertCached({ url: _this.createUrl('/url5'), etagFormat: 'md5' }, function(err) {
+          // Because we specified an etag format, the url was re-fetched so that the etag
+          // could be verified.
+          test.equal(_this.requests.length, 2);
+          test.equal(_this.requests[1], '/url5');
+          cb(err);
+        });
+      }
+    ], function(err) {
+      if (err != null) { test.fail(err); }
+      test.done();
+    });
+  },
+
   testConcurrentRequests: function(test) {
     test.expect(4);
     var _this = this;
