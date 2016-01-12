@@ -1,6 +1,6 @@
 {
   "name": "http-disk-cache",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "An HTTP client that maintains a persistent disk-based cache",
   "homepage": "https://github.com/artillery/node-http-disk-cache#readme",
   "author": "Mark Logan <mark@artillery.com>",
