@@ -51,21 +51,27 @@ Callback arguments:
 - `contents`: A String if the `encoding` option was specified, otherwise a Buffer
 - `filename`: The path to the contents on disk (contents are always saved to disk regardless of cache expiry)
 
-#### cache.openReadStream(url[, headers], callback)
+#### cache.openReadStream(url[, onProgress], callback)
 
 Creates a readable stream for the contents of `url`.
 
 `url` may be a string URL or an object with a `url` key and any of the following options:
 - `headers`: An object of headers to pass along with the request
 
+onProgress arguments:
+- `numBytes`: Number of bytes read in the last chunk.
+
 Callback arguments:
 - `err`: Optional error message
 - `stream`: A readable stream containing the content of the URL
 - `filename`: The path to the contents on disk (contents are always saved to disk regardless of cache expiry)
 
-#### cache.assertCached(url, callback)
+#### cache.assertCached(url[, onProgress], callback)
 
 Checks whether `url` is already in the cache and, if not, fetches and caches it. `url` may be a string or an object with the same options as `openReadStream()`. This is used to warm up the cache and is less resource-intensive than the other methods.
+
+onProgress arguments:
+- `numBytes`: Number of bytes read in the last chunk.
 
 Callback arguments:
 - `err`: Optional error message

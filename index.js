@@ -371,7 +371,12 @@ function parseCacheControl(cacheControl) {
   return ret;
 }
 
-HTTPCache.prototype.assertCached = function(url, cb) {
+HTTPCache.prototype.assertCached = function(url, onProgress, cb) {
+  if (cb == null) {
+    cb = onProgress;
+    onProgress = null;
+  }
+
   var _this = this;
   var options;
   if (typeof url === 'object') {
@@ -391,14 +396,19 @@ HTTPCache.prototype.assertCached = function(url, cb) {
       return cb();
     } else {
       debug('assert cache miss', url);
-      _this.openReadStream(options, function(err, _, path) {
+      _this.openReadStream(options, onProgress, function(err, _, path) {
         cb(err);
       });
     }
   });
 };
 
-HTTPCache.prototype.openReadStream = function(url, cb) {
+HTTPCache.prototype.openReadStream = function(url, onProgress, cb) {
+  if (cb == null) {
+    cb = onProgress;
+    onProgress = null;
+  }
+
   var _this = this;
   var options;
   if (typeof url === 'object') {
@@ -496,6 +506,13 @@ HTTPCache.prototype.openReadStream = function(url, cb) {
       // Write the file out and wait.
       cacheWriter.pipeFrom(res);
       return finish(null, res);
+    });
+
+    // Handle progress updates.
+    req.on('data', function(data) {
+      if (typeof onProgress === 'function') {
+        onProgress(data.length);
+      }
     });
 
     // Start the request.
