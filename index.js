@@ -169,6 +169,7 @@ CacheWriter.prototype.pipeFrom = function pipeFrom(readable) {
 function HTTPCache(cacheRoot) {
   this.cacheRoot = cacheRoot;
   this._inFlightWrites = {};
+  this._inFlightRequests = [];
 
   // What urls have been loaded by this instance of the cache? Those urls remain valid
   // even if they would otherwise expire.
@@ -403,6 +404,12 @@ HTTPCache.prototype.assertCached = function(url, onProgress, cb) {
   });
 };
 
+HTTPCache.prototype.abortAllInFlightRequests = function() {
+  for (var i = 0; i < this._inFlightRequests.length; i++) {
+    this._inFlightRequests[i].abort();
+  }
+};
+
 HTTPCache.prototype.openReadStream = function(url, onProgress, cb) {
   if (cb == null) {
     cb = onProgress;
@@ -455,10 +462,27 @@ HTTPCache.prototype.openReadStream = function(url, onProgress, cb) {
 
     var req = request.get({ url: options.url, headers: options.headers, followRedirect: true });
 
+    _this._inFlightRequests.push(req);
+    var removeFromInFlightRequests = function() {
+      var index = _this._inFlightRequests.indexOf(req);
+      if (index >= 0) {
+        _this._inFlightRequests.splice(index, 1);
+      }
+    };
+
     // Handle HTTP request errors.
     req.on('error', function reqOnError(err) {
       cacheWriter.end();
+      removeFromInFlightRequests();
       cb(err);
+      req.removeAllListeners();
+      return;
+    });
+
+    req.on('abort', function reqOnAbort() {
+      cacheWriter.end();
+      removeFromInFlightRequests();
+      cb("Request was aborted");
       req.removeAllListeners();
       return;
     });
@@ -479,6 +503,8 @@ HTTPCache.prototype.openReadStream = function(url, onProgress, cb) {
       cacheWriter.end();
     }
     req.on('response', function(res) {
+      removeFromInFlightRequests();
+
       if (res.statusCode !== 200) {
         return finish("URL " + url + " could not be fetched. status: " + res.statusCode);
       }
