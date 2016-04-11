@@ -76,6 +76,10 @@ onProgress arguments:
 Callback arguments:
 - `err`: Optional error message
 
+#### cache.abortAllInFlightRequests()
+
+Calls `abort()` on any in-progress HTTP requests that may have been initiated by `openReadStream()` or `assertCached()`. The callbacks for those methods will get called with an error.
+
 #### cache.getContentPathname(url[, options])
 
 Return a path to a requested URL assuming that it's already been cached.

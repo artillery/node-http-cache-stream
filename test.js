@@ -20,7 +20,7 @@ process.on('uncaughtException', function (err) {
     process.exit(1);
 });
 
-function newUrlReply(contents, status, headers) {
+function newUrlReply(contents, status, headers, defer) {
   if (!headers) {
     headers = {};
   }
@@ -28,6 +28,7 @@ function newUrlReply(contents, status, headers) {
     contents: contents,
     status: status,
     headers: headers,
+    defer: defer || false,
     fetchCount: 0
   };
 }
@@ -91,6 +92,15 @@ exports.tests = {
           'Cache-Control': 'max-age=200',
           'etag': '"' + md5hash(url7contents) + '"'
         }),
+        '/defer': newUrlReply('deferred contents', 200, {}, true),
+      };
+
+      _this.deferredReplies = [];
+      _this.doNextDefferedReply = function() {
+        var fn = _this.deferredReplies.shift();
+        if (typeof fn === 'function') {
+          setTimeout(fn, 0);
+        }
       };
 
       _this.createUrl = function(urlPath) {
@@ -110,8 +120,14 @@ exports.tests = {
         for (var header in reply.headers) {
           response.setHeader(header, reply.headers[header]);
         }
-        response.write(reply.contents);
-        response.end();
+        _this.deferredReplies.push(function() {
+          response.write(reply.contents);
+          response.end();
+        });
+        if (!reply.defer) {
+          _this.doNextDefferedReply();
+        } else {
+        }
       });
       _this.server.listen(0, '127.0.0.1');
       _this.server.on('socket', function(socket) {
@@ -402,7 +418,15 @@ exports.tests = {
     }
 
     var _this = this;
-    var urls = Object.keys(this.serverUrls);
+
+    var keys = Object.keys(this.serverUrls);
+    var urls = [];
+    for (i = 0; i < keys.length; i++) {
+      if (!this.serverUrls[keys[i]].defer) {
+        urls.push(keys[i]);
+      }
+    };
+
     var count = 300;
     function pickUrl() {
       return urls[count % urls.length];
@@ -550,7 +574,26 @@ exports.tests = {
       if (err != null) { test.fail("Failed: " + err); }
       test.done();
     });
+  },
+
+  testAbortAllInFlightRequests: function(test) {
+    var _this = this;
+    _this.cache.assertCached({ url: _this.createUrl('/defer') }, function(err) {
+      test.equal(err, "Request was aborted");
+      test.done();
+    });
+    // Waiting 500ms is kind of gross, but assertCached() calls openReadStream(), which calls
+    // _checkCache(), which calls fs.readFile asynchronously. It's just easier to assume for testing
+    // that _checkCache takes <500ms so we can schedule abortAllInFlightRequests() to occur after
+    // the request has been added to _inFlightRequests.
+    setTimeout(function() {
+      _this.cache.abortAllInFlightRequests();
+      setTimeout(function() {
+        _this.doNextDefferedReply();
+      }, 0);
+    }, 500);
   }
+
 };
 
 // Load the url twice, advancing the time by deltaT in between the two fetches.
