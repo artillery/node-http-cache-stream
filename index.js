@@ -111,6 +111,23 @@ CacheWriter.prototype.wait = function wait(cb) {
   this._waiters.push(cb);
 };
 
+CacheWriter.prototype.writeSync = function writeSync(contents) {
+  var hash = crypto.createHash('md5');
+  hash.update(contents);
+  this.meta.contentMD5 = hash.digest('hex');
+  var dir = pathlib.dirname(this.contentPath);
+  mkdirp.sync(dir);
+  fs.writeFileSync(this.contentPath, contents);
+  debug("Wrote cache entry: " + JSON.stringify(this, null, '  '));
+  if (!this.validateEtag()) {
+    this.err = 'Failed to validate etag';
+    return;
+  }
+  var metaStr = JSON.stringify(this.meta);
+  fs.writeFileSync(this.metaPath, metaStr);
+  this.end();
+};
+
 CacheWriter.prototype.pipeFrom = function pipeFrom(readable) {
   this.piping = true;
 
@@ -595,6 +612,90 @@ HTTPCache.prototype.getContents = function(url, cb) {
     });
 
   });
+};
+
+// Synchronously write a file into the cache. url must start with `cache:`.
+// Throws on error.
+HTTPCache.prototype.setContentsSync = function(url, contents) {
+  var options;
+  if (typeof url === 'object') {
+    options = url;
+    url = options.url;
+  } else {
+    options = { url: url };
+  }
+
+  if (!/^cache:/.test(url)) {
+    throw new Error("setContentsSync can only be called on cache:// URLs");
+  }
+  var entry = new CacheEntry(url, options.etagFormat);
+
+  var cacheWriter = this._createCacheWriter(entry);
+  cacheWriter.setExpiry(this._now() + (options.maxAgeNum || 0));
+  cacheWriter.setEtag(options.etag);
+  cacheWriter.writeSync(contents);
+  this._sessionCache[entry.url] = 1;
+};
+
+// Synchronously read a url from the cache. Returns `null` if the url is expired
+// or not cached.
+// Throws on error.
+HTTPCache.prototype.getContentsSync = function(url) {
+  var options;
+  if (typeof url === 'object') {
+    options = url;
+    url = options.url;
+  } else {
+    options = { url: url };
+  }
+
+  var entry = new CacheEntry(url, options.etagFormat);
+  var metaContents = fs.readFileSync(this._absPath(entry.metaPath), 'utf8');
+  var meta;
+  try {
+    meta = JSON.parse(metaContents);
+  } catch (e) {
+    debug('metadata was invalid', entry.metaPath, "'" + metaContents + "'");
+    return null;
+  }
+
+  if (!validateMetadata(meta)) {
+    debug("invalid metadata", meta);
+    return null;
+  }
+  if (entry.etagFormat != null) {
+    // If the etag format changes, the contents are invalidated.
+    if (entry.etagFormat !== meta.etagFormat) {
+      debug("entry had wrong etagFormat", entry.etagFormat, 'vs', meta.etagFormat);
+      return null;
+    }
+    // This just compares the two checksums recorded in the file. The actual metaContents are
+    // re-checksummed and compared against contentMD5 later.
+    if (meta.etagFormat === 'md5' && meta.etag !== meta.contentMD5) {
+      debug("contentMD5 does not match etag", meta);
+      return null;
+    }
+  }
+
+  if (!this._cachedThisSession(entry) && (this._now() > meta.expiry)) {
+    debug("Contents expired");
+    return null;
+  }
+
+  var contents = fs.readFileSync(this._absPath(entry.contentPath), options.encoding);
+  var hash = crypto.createHash('md5');
+  hash.update(contents);
+  var md5 = hash.digest('hex');
+  if (md5 === meta.contentMD5) {
+    debug('verified md5 digest ' + md5 + ' for', entry.contentPath);
+    return contents;
+  } else {
+    console.error(
+      "Detected corrupted cache object: " + entry.contentPath + "\n" +
+      "Expected md5 " + meta.contentMD5 + " saw " + md5
+    );
+    return null;
+  }
 };
 
 var RepairResult = {
