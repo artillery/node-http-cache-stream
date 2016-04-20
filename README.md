@@ -87,6 +87,20 @@ Return a path to a requested URL assuming that it's already been cached.
 Options:
 - `absolute`: Return an absolute path instead of a path relative to the cache root (default: false)
 
+#### cache.setContentsSync(url, contents)
+
+Synchronously set the contents for `url`. `url` must begin with `cache:`. Throws on error.
+
+#### cache.getContentsSync(url, contents)
+
+Synchronously get the contents for `url`. Throws on error.
+
+`url` may be a string URL or an object with a `url` key and any of the following options:
+- `headers`: An object of headers to pass along with the request
+- `encoding`: If specified, will return a String instead of a Buffer
+
+Returns a buffer, unless `encoding` is provided.
+
 #### cache.reset()
 
 `reset` must be called if you wish to reload any expired assets. (Otherwise, assets always

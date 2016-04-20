@@ -592,6 +592,54 @@ exports.tests = {
         _this.doNextDefferedReply();
       }, 0);
     }, 500);
+  },
+
+  testSetAndGetContentsSync: function (test) {
+    var contents = "some contents";
+    this.cache.setContentsSync({
+      url: 'cache://hay',
+      etagFormat: 'md5',
+      etag: md5hash(contents),
+      maxAgeNum: 1000
+    }, contents);
+
+    var cachedContents = this.cache.getContentsSync({ url: 'cache://hay' });
+    test.equal(cachedContents, contents);
+
+    this.cache.reset();
+
+    cachedContents = this.cache.getContentsSync({ url: 'cache://hay' });
+    test.equal(cachedContents, contents);
+
+    this.nowSeconds += 1100;
+    this.cache.reset();
+
+    cachedContents = this.cache.getContentsSync({ url: 'cache://hay' });
+    test.equal(cachedContents, null);
+
+    test.done();
+  },
+
+  testSetAndGetContentsZeroExpiry: function (test) {
+    var contents = "some contents";
+    this.cache.setContentsSync({
+      url: 'cache://hay',
+      etagFormat: 'md5',
+      etag: md5hash(contents),
+      maxAgeNum: 0
+    }, contents);
+
+    this.nowSeconds += 10;
+
+    var cachedContents = this.cache.getContentsSync({ url: 'cache://hay' });
+    test.equal(cachedContents, contents);
+
+    this.cache.reset();
+
+    cachedContents = this.cache.getContentsSync({ url: 'cache://hay' });
+    test.equal(cachedContents, null);
+
+    test.done();
   }
 
 };
