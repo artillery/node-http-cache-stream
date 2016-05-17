@@ -106,6 +106,22 @@ Returns a buffer, unless `encoding` is provided.
 `reset` must be called if you wish to reload any expired assets. (Otherwise, assets always
 persist for the lifetime of the cache, even if they would not otherwise be cached at all.)
 
+#### cache.clean(shouldCleanCb, finalCb)
+
+Iterates over all `.meta` files in the cache. For each one, the meta data is loaded and parsed,
+and the corresponding content file is `stat`ed.
+
+`shouldCleanCb` is then called as `shouldCleanCb(curFileNum, totalFiles, metadata, stat)`
+where:
+
+  * curFileNum: A running count of how many files we have processed.
+  * totalFiles: The total number of files that are to be processed. (Will not change in
+                between calls to `shouldCleanCb`).
+  * metadata: The parsed metadata contained in the meta file for the current cache entry.
+  * stat: An fs.Stat object for the content file corresponding to the current meta file.
+
+`shouldCleanCb` should return `'REMOVE'` to signal that the entry should be removed from the
+cache, or `'KEEP'` to indicate that the file should be kept.
 
 ## Notes
 

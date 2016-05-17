@@ -777,4 +777,80 @@ HTTPCache.prototype.repair = function(cb) {
   });
 };
 
+HTTPCache.prototype.clean = function (shouldClean, cb) {
+  var _this = this;
+
+  var numFiles = 0;
+  var fileProgress = 0;
+  var errors = [];
+
+  function checkFile(metaPath, nextCb) {
+    var curFile = fileProgress;
+    fileProgress++;
+
+    if (!/\.meta$/.test(metaPath)) {
+      errors.push('invalid meta path: ' + metaPath);
+      return nextCb();
+    }
+    // Strip off .meta
+    var path = metaPath.slice(0, -5)
+    var meta = null;
+    var shouldCleanResult = null;
+
+    async.series([
+      // Read the meta file.
+      function (cb) {
+        fs.readFile(
+          _this._absPath(metaPath),
+          { encoding: 'utf8' },
+          function (err, contents) {
+            if (err) { return cb(err); }
+
+            try {
+              meta = JSON.parse(contents);
+            } catch (e) {
+              return cb(e);
+            }
+            cb();
+          }
+        )
+      },
+
+      // Stat the content file.
+      function (cb) {
+        fs.stat(_this._absPath(path), function(err, stat) {
+          if (err) { return cb(err); }
+          shouldCleanResult = shouldClean(fileProgress, numFiles, meta, stat);
+          cb();
+        });
+      },
+
+      // Maybe delete the file.
+      function (cb) {
+        if (shouldCleanResult == 'REMOVE') {
+          deleteEntry(_this._absPath(metaPath), function(err) {
+            cb(err);
+          })
+        } else {
+          cb();
+        }
+      }
+    ], function (err) {
+      if (err) { errors.push(err); }
+      nextCb();
+    });
+  }
+
+  glob.glob("**/*.meta", { cwd: this.cacheRoot }, function (err, files) {
+    var i;
+    numFiles = files.length
+    async.forEachSeries(files, checkFile, function(err) {
+      if (errors.length > 0) {
+        console.error("Errors while cleaning:", JSON.stringify(errors, null, '  '));
+      }
+      cb();
+    });
+  });
+};
+
 exports.HTTPCache = HTTPCache;
