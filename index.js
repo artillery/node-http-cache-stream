@@ -825,8 +825,10 @@ HTTPCache.prototype.clean = function (shouldClean, cb) {
       function (cb) {
         fs.stat(_this._absPath(path), function(err, stat) {
           if (err) { return cb(fileError('stat', err)); }
-          shouldCleanResult = shouldClean(fileProgress, numFiles, meta, stat);
-          cb();
+          shouldClean(fileProgress, numFiles, meta, stat, function(result) {
+            shouldCleanResult = result;
+            cb();
+          });
         });
       },
 
