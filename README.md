@@ -111,7 +111,7 @@ persist for the lifetime of the cache, even if they would not otherwise be cache
 Iterates over all `.meta` files in the cache. For each one, the meta data is loaded and parsed,
 and the corresponding content file is `stat`ed.
 
-`shouldCleanCb` is then called as `shouldCleanCb(curFileNum, totalFiles, metadata, stat)`
+`shouldCleanCb` is then called as `shouldCleanCb(curFileNum, totalFiles, metadata, stat, resultCb)`
 where:
 
   * curFileNum: A running count of how many files we have processed.
@@ -119,8 +119,9 @@ where:
                 between calls to `shouldCleanCb`).
   * metadata: The parsed metadata contained in the meta file for the current cache entry.
   * stat: An fs.Stat object for the content file corresponding to the current meta file.
+  * resultCb: a callback which takes a single argument.
 
-`shouldCleanCb` should return `'REMOVE'` to signal that the entry should be removed from the
+`shouldCleanCb` should call `resultCb` with `'REMOVE'` to signal that the entry should be removed from the
 cache, or `'KEEP'` to indicate that the file should be kept.
 
 ## Notes

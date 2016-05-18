@@ -664,12 +664,12 @@ exports.tests = {
       // clean the cache
       function (cb) {
         var iter = 0;
-        _this.cache.clean(function(curFile, totalFiles, metadata, stat) {
+        _this.cache.clean(function(curFile, totalFiles, metadata, stat, resultCb) {
           iter++;
           if (iter > 2) {
-            return 'REMOVE';
+            return resultCb('REMOVE');
           } else {
-            return 'KEEP';
+            return resultCb('KEEP');
           }
         }, function() {
           glob.glob("**/*.meta", { cwd: _this.cache.cacheRoot }, function (err, files) {
