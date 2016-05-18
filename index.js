@@ -797,6 +797,11 @@ HTTPCache.prototype.clean = function (shouldClean, cb) {
     var meta = null;
     var shouldCleanResult = null;
 
+    function fileError(action, e) {
+      if (e == null) { return null; }
+      return "Couldn't " + action + " " + metaPath + ": " + e;
+    }
+
     async.series([
       // Read the meta file.
       function (cb) {
@@ -804,12 +809,12 @@ HTTPCache.prototype.clean = function (shouldClean, cb) {
           _this._absPath(metaPath),
           { encoding: 'utf8' },
           function (err, contents) {
-            if (err) { return cb(err); }
+            if (err) { return cb(fileError('read', err)); }
 
             try {
               meta = JSON.parse(contents);
             } catch (e) {
-              return cb(e);
+              return cb(fileError('parse', e));
             }
             cb();
           }
@@ -819,7 +824,7 @@ HTTPCache.prototype.clean = function (shouldClean, cb) {
       // Stat the content file.
       function (cb) {
         fs.stat(_this._absPath(path), function(err, stat) {
-          if (err) { return cb(err); }
+          if (err) { return cb(fileError('stat', err)); }
           shouldCleanResult = shouldClean(fileProgress, numFiles, meta, stat);
           cb();
         });
@@ -829,7 +834,7 @@ HTTPCache.prototype.clean = function (shouldClean, cb) {
       function (cb) {
         if (shouldCleanResult == 'REMOVE') {
           deleteEntry(_this._absPath(metaPath), function(err) {
-            cb(err);
+            cb(fileError('delete', err));
           })
         } else {
           cb();
