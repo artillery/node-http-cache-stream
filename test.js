@@ -12,6 +12,7 @@ var temp = require('temp');
 var execSync = require('child_process').execSync;
 var debug = require('debug')('http-disk-cache');
 var async = require('artillery-async');
+var glob = require('glob');
 
 var httpcache = require('./index');
 
@@ -640,8 +641,49 @@ exports.tests = {
     test.equal(cachedContents, null);
 
     test.done();
-  }
+  },
 
+  testCacheCleaning: function (test) {
+    test.expect(1);
+    var _this = this;
+    async.series([
+      // populate the cache.
+      function(cb) {
+        async.forEachSeries(
+          [1, 2, 3, 4],
+          function (num, nextCb) {
+            _this.cache.openReadStream(_this.createUrl('/url' + num), function(err, stream, path) {
+              nextCb(err);
+            });
+          },
+          function (err) {
+            cb(err)
+          }
+        );
+      },
+      // clean the cache
+      function (cb) {
+        var iter = 0;
+        _this.cache.clean(function(curFile, totalFiles, metadata, stat) {
+          iter++;
+          if (iter > 2) {
+            return 'REMOVE';
+          } else {
+            return 'KEEP';
+          }
+        }, function() {
+          glob.glob("**/*.meta", { cwd: _this.cache.cacheRoot }, function (err, files) {
+            // We created 4 files originally - only 2 should remain.
+            test.equal(files.length, 2);
+            cb();
+          });
+        });
+      }
+    ], function (err) {
+      if (err) { test.fail(err) }
+      test.done();
+    });
+  }
 };
 
 // Load the url twice, advancing the time by deltaT in between the two fetches.
