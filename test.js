@@ -13,6 +13,7 @@ var execSync = require('child_process').execSync;
 var debug = require('debug')('http-disk-cache');
 var async = require('artillery-async');
 var glob = require('glob');
+var stream = require('stream');
 
 var httpcache = require('./index');
 
@@ -36,16 +37,19 @@ function newUrlReply(contents, status, headers, defer) {
 
 function catStream(stream, cb) {
   chunks = [];
+  stream.on('error', function (err) {
+    cb(err);
+  });
   stream.on('data', function (chunk) {
     chunks.push(chunk);
   });
   stream.on('end', function () {
     if (chunks.length === 0) {
-      cb(null);
+      cb(null, null);
     } else if (typeof chunks[0] === 'string') {
-      cb(chunks.join(''));
+      cb(null, chunks.join(''));
     } else { // Buffer
-      cb(Buffer.concat(chunks));
+      cb(null, Buffer.concat(chunks));
     }
   });
 }
@@ -166,7 +170,7 @@ exports.tests = {
     var _this = this;
     this.cache.openReadStream(this.createUrl('/url1'), function(err, stream, path) {
       test.ok(stream instanceof fs.ReadStream, "stream should be an fs.ReadStream");
-      catStream(stream, function (contents) {
+      catStream(stream, function (err, contents) {
         test.equal(contents.toString('utf8'), 'url1 contents');
         test.done();
       });
@@ -182,7 +186,7 @@ exports.tests = {
           test.equal(_this.requests.length, 1);
           test.equal(_this.requests[0], '/url5');
           test.ok(stream instanceof fs.ReadStream, "stream should be an fs.ReadStream");
-          catStream(stream, function (contents) {
+          catStream(stream, function (err, contents) {
             test.equal(contents.toString('utf8'), 'url5 contents');
             test.done();
           });
@@ -192,7 +196,7 @@ exports.tests = {
         _this.cache.openReadStream({ url: _this.createUrl('/url5'), etagFormat: 'md5' }, function(err, stream, path) {
           test.equal(_this.requests.length, 1); // request is handled from cache.
           test.ok(stream instanceof fs.ReadStream, "stream should be an fs.ReadStream");
-          catStream(stream, function (contents) {
+          catStream(stream, function (err, contents) {
             test.equal(contents.toString('utf8'), 'url5 contents');
             test.done();
           });
@@ -213,7 +217,7 @@ exports.tests = {
           test.equal(_this.requests.length, 1);
           test.equal(_this.requests[0], '/url7');
           test.ok(stream instanceof fs.ReadStream, "stream should be an fs.ReadStream");
-          catStream(stream, function (contents) {
+          catStream(stream, function (err, contents) {
             test.equal(contents.toString('utf8'), 'url7 contents');
             test.done();
           });
@@ -223,7 +227,7 @@ exports.tests = {
         _this.cache.openReadStream({ url: _this.createUrl('/url7'), etagFormat: 'md5' }, function(err, stream, path) {
           test.equal(_this.requests.length, 1); // request is handled from cache.
           test.ok(stream instanceof fs.ReadStream, "stream should be an fs.ReadStream");
-          catStream(stream, function (contents) {
+          catStream(stream, function (err, contents) {
             test.equal(contents.toString('utf8'), 'url7 contents');
             test.done();
           });
@@ -256,7 +260,7 @@ exports.tests = {
         _this.cache.openReadStream({ url: _this.createUrl('/url1'), etagFormat: 'md5' }, function(err, stream, path) {
           test.equal(_this.requests.length, 1);
           test.equal(_this.requests[0], '/url1');
-          catStream(stream, function (contents) {
+          catStream(stream, function (err, contents) {
             test.equal(contents.toString('utf8'), 'url1 contents');
             cb();
           });
@@ -268,7 +272,7 @@ exports.tests = {
         _this.cache.openReadStream({ url: _this.createUrl('/url1'), etagFormat: 'md5' }, function(err, stream, path) {
           test.equal(_this.requests.length, 2);
           test.equal(_this.requests[1], '/url1');
-          catStream(stream, function (contents) {
+          catStream(stream, function (err, contents) {
             test.equal(contents.toString('utf8'), 'url1 contents');
             cb();
           });
@@ -358,7 +362,7 @@ exports.tests = {
   },
 
   testConcurrentRequests: function(test) {
-    test.expect(4);
+    test.expect(2);
     var _this = this;
     var count = 2;
 
@@ -367,8 +371,7 @@ exports.tests = {
       if (count === 0) { test.done(); }
     };
     var cb = function(err, stream, path) {
-      test.ok(stream instanceof fs.ReadStream, "stream should be an fs.ReadStream");
-      catStream(stream, function (contents) {
+      catStream(stream, function (err, contents) {
         test.equal(contents.toString('utf8'), 'url1 contents');
         barrier();
       });
@@ -379,34 +382,34 @@ exports.tests = {
 
 
   testBasicCaching: function(test) {
-    test.expect(8);
+    test.expect(6);
     doTest(this, test, '/url1', 'url1 contents', false, true, 0, test.done);
   },
 
   testExplicitNoCache: function(test) {
-    test.expect(8);
+    test.expect(6);
     doTest(this, test, '/url2', 'url2 contents', false, false, 0, test.done);
   },
 
   testUnparseableCacheControl: function(test) {
-    test.expect(8);
+    test.expect(6);
     doTest(this, test, '/url4', 'url4 contents', false, false, 0, test.done);
   },
 
   testNoCache: function(test) {
     // URLs without a Cache-Control header don't get cached.
-    test.expect(8);
+    test.expect(6);
     doTest(this, test, '/url3', 'url3 contents', false, false, 0, test.done);
   },
 
   testUnexpiredCache: function(test) {
-    test.expect(8);
+    test.expect(6);
     // 200 is the maximum allowable age.
     doTest(this, test, '/url1', 'url1 contents', false, true, 200, test.done);
   },
 
   testExpiredCache: function(test) {
-    test.expect(8);
+    test.expect(6);
     doTest(this, test, '/url1', 'url1 contents', false, false, 201, test.done);
   },
 
@@ -691,29 +694,27 @@ exports.tests = {
 function doTest(_this, test, url, contents, firstCached, secondCached, deltaT, cb) {
   var count = 0;
   if (!deltaT) { deltaT = 0; }
-  _this.cache.openReadStream(_this.createUrl(url), function(err, stream, path) {
+
+  _this.cache.getContents(_this.createUrl(url), function(err, buffer, path) {
     if (!firstCached) { count++; }
-    if (!stream) {
-      test.ok(err, "if stream is null there had better be an error");
+    if (!buffer) {
+      test.ok(err, "if buffer is null there had better be an error");
       return cb();
     }
-    test.ok(stream instanceof fs.ReadStream, "stream should be an fs.ReadStream");
     test.ok(fs.existsSync(path));
-    catStream(stream, function (contents) {
-      test.equal(contents.toString('utf8'), contents);
+
+    test.equal(buffer.toString('utf8'), contents);
+    test.equal(_this.serverUrls[url].fetchCount, count);
+    _this.nowSeconds += deltaT;
+    _this.cache.reset();
+
+    _this.cache.getContents(_this.createUrl(url), function(err, buffer, path) {
+      if (!secondCached) { count++; }
+
+      test.ok(fs.existsSync(path));
       test.equal(_this.serverUrls[url].fetchCount, count);
-      _this.nowSeconds += deltaT;
-      _this.cache.reset();
-      _this.cache.openReadStream(_this.createUrl(url), function(err, stream, path) {
-        if (!secondCached) { count++; }
-        test.ok(stream instanceof fs.ReadStream, "stream should be an fs.ReadStream");
-        test.ok(fs.existsSync(path));
-        test.equal(_this.serverUrls[url].fetchCount, count);
-        catStream(stream, function (contents) {
-          test.equal(contents.toString('utf8'), contents);
-          cb();
-        });
-      });
+      test.equal(buffer.toString('utf8'), contents);
+      cb();
     });
   });
 

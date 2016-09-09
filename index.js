@@ -16,6 +16,9 @@ var urllib = require('url');
 var debug = require('debug')('http-disk-cache');
 var glob = require('glob');
 
+var util = require('util');
+var stream = require('stream');
+
 /////////////// CacheEntry ///////////////
 
 function canonicalUrl(url) {
@@ -178,6 +181,32 @@ CacheWriter.prototype.pipeFrom = function pipeFrom(readable) {
   });
 };
 
+function ChecksumStream(expectedChecksum, options) {
+  if (!(this instanceof ChecksumStream)) {
+    return new ChecksumStream(expectedChecksum, options);
+  }
+  stream.Transform.call(this, options);
+  this.hash = crypto.createHash('md5');
+  this.expectedChecksum = expectedChecksum;
+}
+util.inherits(ChecksumStream, stream.Transform);
+
+ChecksumStream.prototype._transform = function (chunk, enc, cb) {
+  var buffer = Buffer.isBuffer(chunk) ? chunk : new Buffer(chunk, enc);
+  this.hash.update(buffer); // update hash
+  this.push(chunk, enc);
+  cb();
+};
+
+ChecksumStream.prototype._flush = function (cb) {
+  var checksum = this.hash.digest('hex');
+  if (checksum != this.expectedChecksum) {
+    return cb(new Error('invalid checksum'));
+  }
+  cb();
+};
+
+
 /////////////// HTTPCache ///////////////
 
 // HTTPCache handles HTTP requests, and caches them to disk if allowed by the Cache-Control
@@ -247,7 +276,7 @@ function deleteEntry(metaPath, cb) {
 //    'notcached' - the cache entry is missing, invalid, or expired, but ready to be cached anew.
 //    'error' - the cache entry is corrupted, and could not be deleted. This indicates that
 //              we shouldn't try to cache any responses right now.
-HTTPCache.prototype._checkCache = function(cacheEntry, callback) {
+HTTPCache.prototype._checkCache = function(cacheEntry, skipVerify, callback) {
   var _this = this;
   function loadMetadata(cb) {
     debug('loading metadata from', cacheEntry.metaPath);
@@ -339,8 +368,12 @@ HTTPCache.prototype._checkCache = function(cacheEntry, callback) {
       });
     }
 
-    // We now have valid metadata for an un-expired cache entry. Next, we checksum the contents.
-    validateContents(metadata);
+    if (skipVerify) {
+      return callback(null, CACHE_STATE_CACHED, metadata);
+    } else {
+      // We now have valid metadata for an un-expired cache entry. Next, we checksum the contents.
+      validateContents(metadata);
+    }
   });
 };
 
@@ -404,20 +437,22 @@ HTTPCache.prototype.assertCached = function(url, onProgress, cb) {
     options = { url: url };
   }
 
-  options._skipReadStream = true;
-
   var entry = new CacheEntry(url, options.etagFormat);
 
-  this._checkCache(entry, function(err, cacheStatus) {
-    if (cacheStatus === CACHE_STATE_CACHED) {
-      debug('assert cache hit', url);
-      return cb();
-    } else {
-      debug('assert cache miss', url);
-      _this.openReadStream(options, onProgress, function(err, _, path) {
-        cb(err);
-      });
+  this.openReadStream(options, onProgress, function (err, readStream, path) {
+    if (err != null) {
+      return cb(err);
     }
+    if (readStream == null) { throw new Error("HAY"); }
+    readStream.on('error', function(err) {
+      readStream.removeAllListeners();
+      cb(err);
+    });
+    readStream.on('end', function() {
+      readStream.removeAllListeners();
+      cb();
+    });
+    readStream.resume();
   });
 };
 
@@ -464,14 +499,21 @@ HTTPCache.prototype.openReadStream = function(url, onProgress, cb) {
   var cacheWriter = this._createCacheWriter(entry);
 
   // Check if the entry is available in the cache.
-  this._checkCache(entry, function(err, cacheStatus) {
+  this._checkCache(entry, true, function(err, cacheStatus, metadata) {
 
     debug("cache entry", entry.url, "status=", cacheStatus);
     if (cacheStatus === CACHE_STATE_CACHED) {
       // The cache contents are present and valid, so serve the request from cache.
       cacheWriter.end();
       var readStream = options._skipReadStream ? null : _this._createContentReadStream(entry);
-      return cb(null, readStream, _this._absPath(entry.contentPath));
+      var checksumStream = new ChecksumStream(metadata.contentMD5);
+      checksumStream.on('error', function (err) {
+        if (err === 'invalid checksum') {
+          deleteEntry(_this._absPath(entry.metaPath), function(err) {});
+        }
+      });
+      readStream.pipe(checksumStream);
+      return cb(null, checksumStream, _this._absPath(entry.contentPath));
     } else if (cacheStatus == CACHE_STATE_ERROR) {
       // Some kind of error occurred and we can't access the cache.
       return cb("Error: There was a problem with the asset cache and we can't write files");
@@ -581,6 +623,8 @@ HTTPCache.prototype.getContents = function(url, cb) {
     options = { url: url };
   }
   debug("getContents start", options.url);
+
+  options._skipVerify = true;
 
   this.openReadStream(options, function(err, readStream, path) {
     if (err) { return cb(err); }
@@ -754,7 +798,7 @@ HTTPCache.prototype.repair = function(cb) {
           return;
         }
 
-        _this._checkCache(entry, function (err, status) {
+        _this._checkCache(entry, false, function (err, status) {
           if (err != null) {
             deleteEntry(metaPath, deleteCb);
             return;
@@ -861,3 +905,4 @@ HTTPCache.prototype.clean = function (shouldClean, cb) {
 };
 
 exports.HTTPCache = HTTPCache;
+exports.ChecksumStream = ChecksumStream;
